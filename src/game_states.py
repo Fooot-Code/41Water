@@ -5,6 +5,8 @@ import math
 from ui import draw_hud
 from level import build_level_from_array, LEVELS, TILE_SIZE
 from player import Player
+from warrior import Warrior
+from worry_sphere import WorrySphere
 from enemy import Enemy
 from boss import Boss
 from settings import LEVEL_WIDTH, LEVEL_HEIGHT, VIRTUAL_WIDTH, VIRTUAL_HEIGHT
@@ -22,6 +24,12 @@ class GameStateManager:
         self.guide_alive = True
         self.guide_text = "Welcome, traveler. Let's find 41 Water."
         self.guide_help_count = 0
+        # Guide / betrayal state
+        self.guide_present = False
+        self.guide_pos = (0, 0)
+        self.cutscene_active = False
+        self.cutscene_end_time = 0
+        self.guide_betrayed = False
         self.ending = None
         # Camera settings
         self.camera_x = 0
@@ -60,7 +68,12 @@ class GameStateManager:
         if spawn is None:
             spawn = (32, 32)
         if self.player is None:
-            self.player = Player(spawn[0], spawn[1], char_class)
+            # instantiate appropriate player class
+            if char_class == "Warrior":
+                # use Warrior subclass
+                self.player = Warrior(spawn[0], spawn[1])
+            else:
+                self.player = Player(spawn[0], spawn[1], char_class)
             # give player initial lives
             self.player.lives = self.lives
         else:
@@ -89,31 +102,45 @@ class GameStateManager:
 
         # Initialize enemy spawning system
         self.enemies = []
+        self.enemies_to_defeat = 10  # Consistent number per level
         self.enemy_types = {
-            0: ["grub", "grub", "spider"],  # Stage 1: Mostly grubs, one spider
-            1: ["grub", "spider", "slime"],  # Stage 2: Mixed types
-            2: ["spider", "slime", "ghost"]  # Stage 3: Harder enemies
+            0: ["grub", "grub", "spider", "slime"],  # Stage 1: Variety
+            1: ["grub", "spider", "slime", "ghost"],  # Stage 2: More variety
+            2: ["spider", "slime", "ghost", "ghost"]  # Stage 3: Hardest
         }
-        self.max_enemies = 6 + idx*2
+        self.max_enemies = 10  # Always 10 enemies per level
         self.min_spawn_distance = 200  # Minimum distance from player for spawning
         self.last_spawn_time = time.time()
-        self.spawn_cooldown = 3.0  # Time between spawn attempts
+        self.spawn_cooldown = 2.5  # Time between spawn attempts
+        self.enemies_defeated = 0
         
-        # Add initial enemies
+        # Add initial enemies to start
         self.spawn_initial_enemies()
 
-        # stage-specific guide text
-        self.guide_text = [
-            "This land holds 41 Water. Keep your wits.",
-            "These caverns test your courage. Stay sharp.",
-            "The temple holds what you seek... but not all is as it seems."
-        ][idx]
+        # Stage-specific story text with better narrative
+        stage_story = {
+            0: "The journey begins. Strange creatures guard this passage. Defeat them to continue your search for 41 Water.",
+            1: "You venture deeper. The creatures grow stronger. Your resolve must match their ferocity.",
+            2: "At last... the inner chamber reveals itself. But darkness stirs. Are you ready for what waits beyond?"
+        }
+        self.guide_text = stage_story.get(idx, "Keep moving forward...")
 
-        # final stage sets boss
+        # final stage: place the guide in the inner chamber and trigger betrayal later
         if idx == 2:
-            self.boss = Boss(600, 100)
+            # Do not spawn the boss immediately. Place the guide near the center of the level.
+            self.boss = None
+            self.guide_present = True
+            # place guide roughly in middle of level on ground
+            gp_x = int(self.level_width * 0.5)
+            gp_y = VIRTUAL_HEIGHT - TILE_SIZE * 3
+            self.guide_pos = (gp_x, gp_y)
+            self.guide_betrayed = False
         else:
             self.boss = None
+            self.guide_present = False
+
+        # clear any existing worry spheres when loading stage
+        self.worry_spheres = []
 
     def update(self, dt, inputs):
         # inputs is dict of keys
@@ -209,15 +236,25 @@ class GameStateManager:
                     self.player.health -= e.damage
                     self.player.spawn_time = now  # reuse spawn_time as temporary invul timer
 
-        # Remove dead enemies
+        # Remove dead enemies and track defeats
+        old_count = len(self.enemies)
         self.enemies = [e for e in self.enemies if not getattr(e, "dead", False)]
+        new_count = len(self.enemies)
+        if old_count > new_count:
+            # Enemy(ies) were defeated
+            self.enemies_defeated += (old_count - new_count)
+            if self.enemies_defeated >= self.enemies_to_defeat:
+                self.guide_text = f"All enemies defeated! Proceed to the right exit. ({self.enemies_defeated}/{self.enemies_to_defeat})"
+            else:
+                remaining = self.enemies_to_defeat - self.enemies_defeated
+                self.guide_text = f"Enemies remaining: {remaining}"
 
         # Stage progression: check during movement and dash
         edge_threshold = self.level_width - 60
         if (self.player.rect.right >= edge_threshold or 
             (self.player.dashing and 
              self.player.rect.right + (self.player.dash_speed * self.player.facing) >= edge_threshold)):
-            if len(self.enemies) == 0 and not self.boss:
+            if self.enemies_defeated >= self.enemies_to_defeat and not self.boss:
                 # Progressive story elements before advancing
                 stage_completion_text = [
                     "The path opens ahead. The guide nods approvingly at your progress.",
@@ -232,35 +269,80 @@ class GameStateManager:
                     # loaded next stage; early return so we don't update boss on old stage
                     return
             else:
-                self.guide_text = "Clear the area of enemies before proceeding."
+                if self.enemies_defeated < self.enemies_to_defeat:
+                    remaining = self.enemies_to_defeat - self.enemies_defeated
+                    self.guide_text = f"Clear the area ({self.enemies_defeated}/{self.enemies_to_defeat}). Enemies remain: {remaining}"
+                else:
+                    self.guide_text = "Clear the area of enemies before proceeding."
 
         # Boss update
         if self.boss:
             self.boss.update(self.tiles, self.player.rect)
+
+        # Update worry spheres
+        for ws in list(getattr(self, 'worry_spheres', [])):
+            ws.update(self.enemies)
+            if ws.dead:
+                self.worry_spheres.remove(ws)
+
+        # Betrayal trigger: if the guide is present in final stage and the player approaches,
+        # start a short cutscene that ends with the guide transforming into the boss.
+        if self.stage_index == 2 and self.guide_present and not self.cutscene_active and not self.guide_betrayed:
+            gx = getattr(self, 'guide_pos', (self.level_width // 2, 0))[0]
+            # trigger when player is within 96 pixels of the guide's x position
+            if abs(self.player.rect.centerx - gx) < 96:
+                self.start_betrayal_cutscene()
+
+        # Handle cutscene timing: when a cutscene finishes, perform its action.
+        if self.cutscene_active:
+            if time.time() >= self.cutscene_end_time:
+                # end cutscene and transform guide into boss
+                self.cutscene_active = False
+                self.guide_turns_boss()
+            else:
+                # while cutscene active, skip further gameplay updates
+                return
 
         # guide helps occasionally (increases guide_help_count)
         if len(self.enemies) < 2 and self.guide_help_count < 3:
             self.guide_help_count += 1
 
     def player_attack_check(self):
-        # check attack hit detection (melee)
-        rect = self.player.rect
+        # check attack hit detection using player's attack hitbox
         if self.player.attack():
-            # make hitbox in front of player
-            hb_w = self.player.attack_range * 2
-            hb_h = rect.height - 4
-            if self.player.facing > 0:
-                hitbox = pygame.Rect(rect.right, rect.top+2, hb_w, hb_h)
-            else:
-                hitbox = pygame.Rect(rect.left - hb_w, rect.top+2, hb_w, hb_h)
-            damage = 30 if self.player.char_class == "Worrier" else 20
-            # damage enemies
-            for e in self.enemies:
-                if hitbox.colliderect(e.rect):
-                    e.take_damage(damage)
-            # if boss present
-            if self.boss and hitbox.colliderect(self.boss.rect):
-                self.boss.take_damage(damage)
+            # Get the proper attack hitbox from the player
+            hitbox = self.player.get_attack_hitbox()
+            # If Worrier, spawn a persistent worry sphere instead of just instant hit
+            if getattr(self.player, 'char_class', '') == 'Worrier':
+                # spawn sphere at player's center
+                cx = self.player.rect.centerx
+                cy = self.player.rect.centery
+                ws = WorrySphere(cx, cy, max_radius=80, lifetime=1.2, damage=28, tick=0.25)
+                if not hasattr(self, 'worry_spheres'):
+                    self.worry_spheres = []
+                self.worry_spheres.append(ws)
+                # optionally apply a small instant pulse as well
+                if hitbox:
+                    for e in self.enemies:
+                        if hitbox.colliderect(e.get_hitbox()):
+                            e.take_damage(10)
+            
+            if hitbox:
+                # Class-specific damage values
+                damage_map = {
+                    "Wizard": 20,
+                    "Worrier": 35
+                }
+                damage = damage_map.get(self.player.char_class, 20)
+                
+                # damage enemies
+                for e in self.enemies:
+                    if hitbox.colliderect(e.get_hitbox()):
+                        e.take_damage(damage)
+                
+                # if boss present
+                if self.boss and hitbox.colliderect(self.boss.rect):
+                    self.boss.take_damage(damage)
             return True
         return False
 
@@ -423,12 +505,33 @@ class GameStateManager:
                     
                     # Draw main checkpoint rectangle
                     pygame.draw.rect(surf, color, (draw_x, draw_y, cp['rect'].width, cp['rect'].height))        # enemies (with camera offset)
+        # draw the guide NPC in final stage (if present and not yet betrayed)
+        if self.guide_present and not self.guide_betrayed:
+            # draw a simple guide sprite (circle + name) at guide_pos
+            guide_x, guide_y = self.guide_pos
+            draw_x = guide_x - self.camera_x
+            draw_y = guide_y
+            # only draw if on screen
+            if -32 <= draw_x <= VIRTUAL_WIDTH + 32:
+                # guide body
+                pygame.draw.circle(surf, (180, 220, 255), (int(draw_x), int(draw_y)), 10)
+                # robe
+                pygame.draw.circle(surf, (120, 180, 220), (int(draw_x), int(draw_y)+6), 8)
+                # label
+                font = pygame.font.SysFont('consolas', 12)
+                lbl = font.render('Guide', True, (240,240,240))
+                surf.blit(lbl, (draw_x - lbl.get_width()//2, draw_y - 24))
+
         for e in self.enemies:
             camera_adjusted_rect = e.rect.copy()
             camera_adjusted_rect.x -= self.camera_x
             # Only draw if on screen
             if -camera_adjusted_rect.width <= camera_adjusted_rect.x <= VIRTUAL_WIDTH:
                 e.draw(surf, self.camera_x)
+
+        # draw worry spheres
+        for ws in getattr(self, 'worry_spheres', []):
+            ws.draw(surf, self.camera_x)
         
         # boss (with camera offset)
         if self.boss:
@@ -485,4 +588,38 @@ class GameStateManager:
     def guide_turns_boss(self):
         # Called in final boss sequence: guide reveals themselves and becomes the boss
         # The presence of boss variable simulates that
-        pass
+        # Prevent multiple transformations
+        if self.guide_betrayed:
+            return
+        self.guide_betrayed = True
+        # Remove guide presence
+        self.guide_present = False
+
+        # Spawn the boss at the guide's position, slightly above ground
+        gx, gy = getattr(self, 'guide_pos', (int(self.level_width*0.5), VIRTUAL_HEIGHT - TILE_SIZE*3))
+        # place boss so it appears where the guide was standing
+        self.boss = Boss(gx - 32, gy - 48)
+        # tint boss to feel personal
+        try:
+            self.boss.color = (180, 70, 160)
+            self.boss.health = 220
+        except Exception:
+            pass
+
+        # set guide betrayal text and small taunt
+        self.guide_text = "You were always useful... now step aside, child. 41 Water is mine."
+
+        # Slight penalty/choice effect: if player trusted the guide too much, reduce choice points
+        if hasattr(self.player, 'choice_points'):
+            # betray reduces any 'help' contribution
+            self.player.choice_points = max(0, getattr(self.player, 'choice_points', 0) - 1)
+
+    def start_betrayal_cutscene(self, duration=1.6):
+        # Begin a short cutscene: update guide text and prevent gameplay updates until cutscene ends
+        if self.cutscene_active or self.guide_betrayed:
+            return
+        now = time.time()
+        self.cutscene_active = True
+        self.cutscene_end_time = now + duration
+        # Short dialog that will be shown during the cutscene
+        self.guide_text = "Guide: You have done well. Drink, and be relieved..."

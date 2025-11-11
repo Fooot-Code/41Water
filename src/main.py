@@ -94,7 +94,7 @@ def main():
 def class_select(screen, virtual):
     """Simple text-based class selection screen"""
     font = pygame.font.SysFont("consolas", 20)
-    options = ["Wizard", "Worrier", "Ranger"]
+    options = ["Wizard", "Worrier", "Warrior", "Ranger"]
     sel = 0
     clock = pygame.time.Clock()
     while True:
@@ -112,9 +112,21 @@ def class_select(screen, virtual):
         virtual.fill((20,20,30))
         title = font.render("Choose your class", True, (230,230,230))
         virtual.blit(title, (10,10))
+        
+        # Class descriptions
+        descriptions = {
+            "Wizard": "Magic attacks, balanced stats",
+            "Worrier": "Worry Sphere AOE, tanky",
+            "Warrior": "Heavy melee, tanky and strong",
+            "Ranger": "Ranged agile, faster movement"
+        }
+        desc = descriptions.get(options[sel], "")
+        desc_text = font.render(desc, True, (150, 200, 150))
+        virtual.blit(desc_text, (10, 100))
+        
         for i, opt in enumerate(options):
             col = (255,255,100) if i==sel else (180,180,180)
-            virtual.blit(font.render(opt, True, col), (20 + i*140, 60))
+            virtual.blit(font.render(opt, True, col), (20 + i*100, 60))
         scaled = pygame.transform.scale(virtual, (SCREEN_WIDTH, SCREEN_HEIGHT))
         screen.blit(scaled, (0,0))
         pygame.display.flip()

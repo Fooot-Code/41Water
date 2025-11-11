@@ -62,15 +62,8 @@ class Player(pygame.sprite.Sprite):
             self.magic_power = 10
             self.defense = 40
             self.speed = 1.8
-            self.special_ability = "Berserker Rage"
-        elif char_class == "Ranger":
-            self.max_health = 90
-            self.health = 90
-            self.attack_cooldown = 0.3
-            self.magic_power = 25
-            self.defense = 20
-            self.speed = 2.5
-            self.special_ability = "Swift Shot"
+            self.special_ability = "Worry Sphere"
+        
         # choices (for endings)
         self.choice_points = 0
 
@@ -123,24 +116,19 @@ class Player(pygame.sprite.Sprite):
         if now - self.last_attack >= self.attack_cooldown:
             self.last_attack = now
             self.attacking = True
-            self.attack_frame = 12  # More frames for smoother animation
+            self.attack_frame = 12
             
             # Class-specific attack properties
             if self.char_class == "Wizard":
-                # Magic bolt attack - longer range, magical damage
+                # Magic bolt - ranged magical attack
                 self.attack_range = 45
                 self.attack_height = 16
                 self.attack_frame = 15
             elif self.char_class == "Worrier":
-                # Heavy melee - shorter range but more damage
-                self.attack_range = 32
-                self.attack_height = 24
-                self.attack_frame = 10
-            elif self.char_class == "Ranger":
-                # Quick strikes - medium range, faster cooldown
-                self.attack_range = 38
-                self.attack_height = 12
-                self.attack_frame = 8
+                # Worry Sphere - AOE around player
+                self.attack_range = 40
+                self.attack_height = 80
+                self.attack_frame = 12
             return True
         return False
         
@@ -149,47 +137,29 @@ class Player(pygame.sprite.Sprite):
         if not self.attacking or self.attack_frame <= 0:
             return None
             
-        # Base size on attack frame progress
         progress = self.attack_frame / 12.0
         
-        if self.char_class == "Ranger":
-            # Arrow projectile hitbox
-            width = 16  # Arrow length
-            height = 8  # Arrow width
-            
-            # Calculate position based on facing direction and progress
-            arrow_speed = 8
-            travel_distance = int(arrow_speed * (1 - progress) * self.attack_range)
-            
-            if self.facing > 0:
-                x = self.rect.right + travel_distance
-            else:
-                x = self.rect.left - width - travel_distance
-                
-            y = self.rect.centery - height//2
-            return pygame.Rect(x, y, width, height)
-            
-        elif self.char_class == "Worrier":
-            # Worry Sphere - circular hitbox around player
+        if self.char_class == "Worrier":
+            # Worry Sphere - circular AOE expanding from center
             sphere_radius = int(self.attack_range * progress)
-            # Return a rect that encompasses the circle
             return pygame.Rect(
                 self.rect.centerx - sphere_radius,
                 self.rect.centery - sphere_radius,
                 sphere_radius * 2,
                 sphere_radius * 2
             )
-            
+        
         else:  # Wizard
-            # Standard rectangular hitbox for wizard
+            # Magic bolt - rectangular projectile
             width = int(self.attack_range * progress)
+            
             if self.facing > 0:
                 x = self.rect.right
             else:
                 x = self.rect.left - width
                 
-            y = self.rect.centery - (getattr(self, 'attack_height', 20) // 2)
-            height = getattr(self, 'attack_height', 20)
+            y = self.rect.centery - (getattr(self, 'attack_height', 16) // 2)
+            height = getattr(self, 'attack_height', 16)
             
             return pygame.Rect(x, y, max(1, width), height)
 
@@ -339,52 +309,9 @@ class Player(pygame.sprite.Sprite):
         # Enhanced attack effect
         if self.attacking and self.attack_frame > 0:
             progress = self.attack_frame / 12.0
-            # Main attack swish
-            attack_width = int(self.attack_range * progress)
-            attack_height = 20 + int(10 * (1 - progress))  # Varies height for more dynamic feel
             
-            if self.facing > 0:
-                attack_x = (self.rect.right - camera_x)
-            else:
-                attack_x = (self.rect.left - attack_width - camera_x)
-            
-            if self.char_class == "Ranger":
-                # Draw arrow projectile
-                arrow_speed = 8
-                travel_distance = int(arrow_speed * (1 - progress) * self.attack_range)
-                arrow_length = 16
-                arrow_width = 8
-                
-                if self.facing > 0:
-                    arrow_x = draw_pos[0] + self.rect.width + travel_distance
-                else:
-                    arrow_x = draw_pos[0] - arrow_length - travel_distance
-                
-                arrow_y = self.rect.centery - arrow_width//2
-                
-                # Draw arrow body
-                arrow_surf = pygame.Surface((arrow_length, arrow_width), pygame.SRCALPHA)
-                pygame.draw.polygon(arrow_surf, (100, 255, 100, int(255 * progress)), [
-                    (0, arrow_width//2),  # Tail
-                    (arrow_length * 0.7, 2),  # Top of shaft
-                    (arrow_length, arrow_width//2),  # Tip
-                    (arrow_length * 0.7, arrow_width-2),  # Bottom of shaft
-                ])
-                
-                if self.facing < 0:
-                    arrow_surf = pygame.transform.flip(arrow_surf, True, False)
-                
-                # Draw trail
-                for i in range(3):
-                    trail_x = arrow_x - (i * 4 * self.facing)
-                    trail_surf = arrow_surf.copy()
-                    trail_surf.set_alpha(int(100 * progress) // (i + 1))
-                    surface.blit(trail_surf, (trail_x, arrow_y))
-                
-                surface.blit(arrow_surf, (arrow_x, arrow_y))
-                
-            elif self.char_class == "Worrier":
-                # Draw worry sphere
+            if self.char_class == "Worrier":
+                # Draw worry sphere - ONLY (no arrow)
                 sphere_radius = int(self.attack_range * progress)
                 center_x = draw_pos[0] + self.rect.width//2
                 center_y = self.rect.centery
@@ -398,21 +325,21 @@ class Player(pygame.sprite.Sprite):
                     ring_alpha = int(200 * ring_progress)
                     
                     # Create surface for the ring
-                    ring_size = ring_radius * 2
+                    ring_size = ring_radius * 2 + 4
                     ring_surf = pygame.Surface((ring_size, ring_size), pygame.SRCALPHA)
                     
                     # Draw expanding ring
-                    pygame.draw.circle(ring_surf, (255, 200, 200, ring_alpha), 
-                                    (ring_radius, ring_radius), ring_radius, 3)
+                    pygame.draw.circle(ring_surf, (255, 180, 180, ring_alpha), 
+                                    (ring_radius + 2, ring_radius + 2), ring_radius, 3)
                     
                     # Add energy particles
                     for _ in range(5):
                         particle_angle = random.uniform(0, math.pi * 2)
                         particle_dist = random.uniform(0.5, 0.9) * ring_radius
-                        particle_x = ring_radius + math.cos(particle_angle) * particle_dist
-                        particle_y = ring_radius + math.sin(particle_angle) * particle_dist
+                        particle_x = ring_radius + 2 + math.cos(particle_angle) * particle_dist
+                        particle_y = ring_radius + 2 + math.sin(particle_angle) * particle_dist
                         particle_size = random.randint(2, 4)
-                        pygame.draw.circle(ring_surf, (255, 100, 100, ring_alpha),
+                        pygame.draw.circle(ring_surf, (255, 80, 80, ring_alpha),
                                         (int(particle_x), int(particle_y)), particle_size)
                     
                     # Draw aura waves
@@ -420,18 +347,27 @@ class Player(pygame.sprite.Sprite):
                     num_points = 20
                     for j in range(num_points):
                         angle = j * (2 * math.pi / num_points)
-                        wave = math.sin(angle * 4 + time.time() * 10) * 5
-                        x = ring_radius + math.cos(angle) * (ring_radius + wave)
-                        y = ring_radius + math.sin(angle) * (ring_radius + wave)
+                        wave = math.sin(angle * 4 + now * 10) * 5
+                        x = ring_radius + 2 + math.cos(angle) * (ring_radius + wave)
+                        y = ring_radius + 2 + math.sin(angle) * (ring_radius + wave)
                         wave_points.append((x, y))
                     
                     if len(wave_points) > 2:
-                        pygame.draw.lines(ring_surf, (255, 150, 150, ring_alpha), True, wave_points, 2)
+                        pygame.draw.lines(ring_surf, (255, 120, 120, ring_alpha), True, wave_points, 2)
                     
                     # Blit the ring
-                    surface.blit(ring_surf, (center_x - ring_radius, center_y - ring_radius))
+                    surface.blit(ring_surf, (center_x - ring_radius - 2, center_y - ring_radius - 2))
                 
             else:  # Wizard
+                # Main attack swish
+                attack_width = int(self.attack_range * progress)
+                attack_height = 20 + int(10 * (1 - progress))  # Varies height for more dynamic feel
+                
+                if self.facing > 0:
+                    attack_x = (self.rect.right - camera_x)
+                else:
+                    attack_x = (self.rect.left - attack_width - camera_x)
+                
                 # Draw standard magic attack
                 for i in range(3):
                     layer_progress = progress * (1 - i * 0.2)
@@ -450,26 +386,16 @@ class Player(pygame.sprite.Sprite):
                     alpha_surf.set_alpha(alpha)
                     surface.blit(alpha_surf, attack_rect)
                 
-            # Add particles at the attack point
-            if progress > 0.2:
-                particle_count = 3 if self.char_class == "Wizard" else 2
-                for _ in range(particle_count):
-                    particle_x = attack_x + (attack_width * 0.7 * random.random())
-                    particle_y = self.rect.centery + random.randint(-15, 15)
-                    size = random.randint(2, 4)
-                    p_surf = pygame.Surface((size, size))
-                    
-                    # Class-specific particle colors
-                    if self.char_class == "Wizard":
-                        particle_color = (100, 100, 255)  # Blue magic
-                    elif self.char_class == "Worrier":
-                        particle_color = (255, 100, 100)  # Red energy
-                    else:  # Ranger
-                        particle_color = (100, 255, 100)  # Green energy
-                        
-                    p_surf.fill(particle_color)
-                    p_surf.set_alpha(int(200 * progress))
-                    surface.blit(p_surf, (particle_x, particle_y))
+                # Add particles at the attack point
+                if progress > 0.2:
+                    for _ in range(3):
+                        particle_x = attack_x + (attack_width * 0.7 * random.random())
+                        particle_y = self.rect.centery + random.randint(-15, 15)
+                        size = random.randint(2, 4)
+                        p_surf = pygame.Surface((size, size))
+                        p_surf.fill((100, 100, 255))  # Blue magic
+                        p_surf.set_alpha(int(200 * progress))
+                        surface.blit(p_surf, (particle_x, particle_y))
                     
         # Draw dash cooldown indicator
         cooldown_progress = min(1.0, (now - getattr(self, 'last_dash_time', 0)) / 1.0)

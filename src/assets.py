@@ -18,13 +18,13 @@ def generate_player_sprite(char_class="Wizard"):
     """Return (idle_surf, attack_surf, dash_surf) scaled surfaces for player."""
     base_w, base_h = 12, 18
     idle = make_surface(base_w, base_h)
-    attack = make_surface(base_w+6, base_h)
+    attack = make_surface(base_w+8, base_h)
     dash = make_surface(base_w, base_h)
+    
     # simple color palettes per class
     palettes = {
         "Wizard": ((60,40,120), (200,180,255)),
-        "Worrier": ((120,50,40), (240,200,200)),
-        "Ranger": ((40,100,50), (200,255,200))
+        "Worrier": ((120,50,40), (240,200,200))
     }
     main, accent = palettes.get(char_class, palettes["Wizard"])
 
@@ -72,29 +72,8 @@ def generate_player_sprite(char_class="Wizard"):
                         attack.set_at((x,y), (r, g, b, int(255 * intensity)))
                         
                 elif char_class == "Worrier":
-                    # Sword slash effect (like Hollow Knight)
-                    slash_height = max(1, int(6 * math.sin(weapon_x * math.pi / 4)))  # Ensure minimum height of 1
-                    for offset in range(-slash_height, slash_height + 1):
-                        y_pos = center + offset
-                        if 0 <= y_pos < base_h:
-                            # Main slash
-                            alpha = int(255 * (1 - abs(offset) / slash_height))
-                            attack.set_at((x, y_pos), (255, 255, 255, alpha))
-                            # Trail effect
-                            if weapon_x > 0:
-                                trail_alpha = int(alpha * (1 - weapon_x/4))
-                                if trail_alpha > 0:
-                                    attack.set_at((x-1, y_pos), (200, 200, 255, trail_alpha))
-                                    
-                else:  # Ranger
-                    # Arrow/energy projectile
-                    if abs(y - center) <= 1:
-                        # Arrow shaft
-                        attack.set_at((x,y), accent)
-                        # Glowing tip
-                        if weapon_x >= 4:
-                            glow = min(255, int(200 + 55 * math.sin(weapon_x * 0.8)))
-                            attack.set_at((x,y), (glow, 255, glow, 200))
+                    # No weapon visual (worry sphere is drawn separately)
+                    pass
     # dash: slightly blurred duplicate (we'll draw a trailing pixel)
     for x in range(base_w):
         for y in range(base_h):
