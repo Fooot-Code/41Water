@@ -48,6 +48,16 @@ class GameStateManager:
         self.fade_state = None  # None, 'out', 'in'
         self.fade_start = 0
         self.fade_duration = 1.0
+        
+        # Combat effects (Hollow Knight-style)
+        self.screen_shake = 0
+        self.hitstop_until = 0
+        self.damage_numbers = []
+        
+        # Enhanced morality system
+        self.mercy_count = 0
+        self.aggression_count = 0
+        self.exploration_secrets = 0
 
     def start_new(self, char_class):
         # build first stage
@@ -145,6 +155,21 @@ class GameStateManager:
     def update(self, dt, inputs):
         # inputs is dict of keys
         now = time.time()
+        
+        # Hitstop - freeze gameplay briefly for impact
+        if now < self.hitstop_until:
+            return
+        
+        # Update damage numbers
+        for dmg in list(self.damage_numbers):
+            dmg['y'] += dmg['vy']
+            dmg['life'] -= dt
+            if dmg['life'] <= 0:
+                self.damage_numbers.remove(dmg)
+        
+        # Decay screen shake
+        if self.screen_shake > 0:
+            self.screen_shake = max(0, self.screen_shake - 0.5)
 
         # Handle player death / respawn
         if getattr(self.player, 'health', 999) <= 0:
@@ -232,9 +257,22 @@ class GameStateManager:
             if attacked:
                 attack_rect = e.get_attack_rect()
                 if attack_rect and attack_rect.colliderect(self.player.rect) and not has_protection:
-                    # Apply damage and give brief invulnerability window
+                    # Apply damage with combat effects
                     self.player.health -= e.damage
-                    self.player.spawn_time = now  # reuse spawn_time as temporary invul timer
+                    self.player.spawn_time = now  # invulnerability window
+                    
+                    # Combat effects (Hollow Knight-style)
+                    self.trigger_hitstop(0.08)
+                    self.add_screen_shake(4)
+                    self.spawn_damage_number(self.player.rect.centerx, self.player.rect.top, e.damage, (255, 100, 100))
+                    
+                    # Immediate knockback player away from enemy
+                    knock_dir = 1 if self.player.rect.centerx > e.rect.centerx else -1
+                    self.player.rect.x += knock_dir * 20  # Horizontal knockback
+                    self.player.rect.y -= 10  # Upward knockback
+                    # Also set velocity for continued momentum
+                    self.player.vx = knock_dir * 4
+                    self.player.vy = -3
 
         # Remove dead enemies and track defeats
         old_count = len(self.enemies)
@@ -331,29 +369,68 @@ class GameStateManager:
                 # Class-specific damage values
                 damage_map = {
                     "Wizard": 20,
-                    "Worrier": 35
+                    "Worrier": 35,
+                    "Warrior": 25
                 }
                 damage = damage_map.get(self.player.char_class, 20)
                 
-                # damage enemies
+                # damage enemies with combat effects
+                any_hit = False
                 for e in self.enemies:
                     if hitbox.colliderect(e.get_hitbox()):
                         e.take_damage(damage)
+                        any_hit = True
+                        
+                        # Combat effects
+                        self.spawn_damage_number(e.rect.centerx, e.rect.top, damage, (255, 200, 100))
+                        
+                        # Immediate knockback by directly shifting position
+                        knock_dir = 1 if e.rect.centerx > self.player.rect.centerx else -1
+                        e.rect.x += knock_dir * 15  # Horizontal knockback
+                        e.rect.y -= 8  # Upward knockback
+                        # Also set velocity for continued momentum
+                        e.vx = knock_dir * 3
+                        e.vy = -2
                 
                 # if boss present
                 if self.boss and hitbox.colliderect(self.boss.rect):
                     self.boss.take_damage(damage)
+                    any_hit = True
+                    self.spawn_damage_number(self.boss.rect.centerx, self.boss.rect.top, damage, (255, 255, 100))
+                    
+                # Add hitstop and shake if any hit landed
+                if any_hit:
+                    self.trigger_hitstop(0.05)
+                    self.add_screen_shake(2)
             return True
         return False
 
     def dash_collision_check(self):
         # if dashing, touching enemies damages them, and player is invulnerable briefly
         if self.player.dashing:
+            any_hit = False
             for e in self.enemies:
                 if self.player.rect.colliderect(e.rect):
                     e.take_damage(40)
+                    any_hit = True
+                    self.spawn_damage_number(e.rect.centerx, e.rect.top, 40, (100, 200, 255))
+                    
+                    # Strong immediate knockback from dash
+                    knock_dir = 1 if e.rect.centerx > self.player.rect.centerx else -1
+                    e.rect.x += knock_dir * 25  # Stronger horizontal knockback
+                    e.rect.y -= 15  # Stronger upward knockback
+                    # Also set velocity for continued momentum
+                    e.vx = knock_dir * 5
+                    e.vy = -4
+                    
             if self.boss and self.player.rect.colliderect(self.boss.rect):
                 self.boss.take_damage(15)
+                any_hit = True
+                self.spawn_damage_number(self.boss.rect.centerx, self.boss.rect.top, 15, (100, 200, 255))
+                
+            if any_hit:
+                self.trigger_hitstop(0.06)
+                self.add_screen_shake(3)
 
     def spawn_initial_enemies(self):
         """Spawn initial enemies away from the player's starting position"""
@@ -443,15 +520,20 @@ class GameStateManager:
         # Update camera position
         self.update_camera()
         
-        # tiles (with camera offset)
+        # Screen shake offset
+        shake_x = random.randint(-int(self.screen_shake), int(self.screen_shake)) if self.screen_shake > 0 else 0
+        shake_y = random.randint(-int(self.screen_shake), int(self.screen_shake)) if self.screen_shake > 0 else 0
+        camera_with_shake = self.camera_x - shake_x
+        
+        # tiles (with camera offset and shake)
         for tile_surf, pos in self.tile_surfaces:
-            camera_adjusted_pos = (pos[0] - self.camera_x, pos[1])
+            camera_adjusted_pos = (pos[0] - camera_with_shake, pos[1] + shake_y)
             # Only draw if on screen
             if -tile_surf.get_width() <= camera_adjusted_pos[0] <= VIRTUAL_WIDTH:
                 surf.blit(tile_surf, camera_adjusted_pos)
             # Draw checkpoints with enhanced visuals
             for cp in self.checkpoints:
-                draw_x = cp['rect'].x - self.camera_x
+                draw_x = cp['rect'].x - camera_with_shake
                 draw_y = cp['rect'].y
                 if -32 <= draw_x <= VIRTUAL_WIDTH:
                     now = time.time()
@@ -509,8 +591,8 @@ class GameStateManager:
         if self.guide_present and not self.guide_betrayed:
             # draw a simple guide sprite (circle + name) at guide_pos
             guide_x, guide_y = self.guide_pos
-            draw_x = guide_x - self.camera_x
-            draw_y = guide_y
+            draw_x = guide_x - camera_with_shake
+            draw_y = guide_y + shake_y
             # only draw if on screen
             if -32 <= draw_x <= VIRTUAL_WIDTH + 32:
                 # guide body
@@ -524,26 +606,34 @@ class GameStateManager:
 
         for e in self.enemies:
             camera_adjusted_rect = e.rect.copy()
-            camera_adjusted_rect.x -= self.camera_x
+            camera_adjusted_rect.x -= camera_with_shake
             # Only draw if on screen
             if -camera_adjusted_rect.width <= camera_adjusted_rect.x <= VIRTUAL_WIDTH:
-                e.draw(surf, self.camera_x)
+                e.draw(surf, camera_with_shake, shake_y)
 
         # draw worry spheres
         for ws in getattr(self, 'worry_spheres', []):
-            ws.draw(surf, self.camera_x)
+            ws.draw(surf, camera_with_shake, shake_y)
         
         # boss (with camera offset)
         if self.boss:
             boss_rect = self.boss.rect.copy()
-            boss_rect.x -= self.camera_x
+            boss_rect.x -= camera_with_shake
             if -boss_rect.width <= boss_rect.x <= VIRTUAL_WIDTH:
-                self.boss.draw(surf, self.camera_x)
+                self.boss.draw(surf, camera_with_shake, shake_y)
         
         # player (with camera offset)
         player_rect = self.player.rect.copy()
-        player_rect.x -= self.camera_x
-        self.player.draw(surf, self.camera_x)
+        player_rect.x -= camera_with_shake
+        self.player.draw(surf, camera_x=camera_with_shake, shake_y=shake_y)
+        
+        # Draw damage numbers (no camera offset - world space already applied)
+        font = pygame.font.SysFont('consolas', 14, bold=True)
+        for dmg in self.damage_numbers:
+            alpha = int(255 * dmg['life'])
+            text = font.render(str(dmg['amount']), True, dmg['color'])
+            text.set_alpha(alpha)
+            surf.blit(text, (int(dmg['x'] - camera_with_shake), int(dmg['y'] + shake_y)))
         
         # HUD and guide text (no camera offset - stays fixed on screen)
         draw_hud(surf, self.player, self.stage_index+1, self.guide_text, lives=self.lives)
@@ -623,3 +713,35 @@ class GameStateManager:
         self.cutscene_end_time = now + duration
         # Short dialog that will be shown during the cutscene
         self.guide_text = "Guide: You have done well. Drink, and be relieved..."
+    
+    def trigger_hitstop(self, duration=0.1):
+        """Freeze gameplay briefly for impact feel"""
+        self.hitstop_until = time.time() + duration
+        
+    def add_screen_shake(self, intensity=3):
+        """Add screen shake effect"""
+        self.screen_shake = max(self.screen_shake, intensity)
+        
+    def spawn_damage_number(self, x, y, amount, color=(255, 200, 100)):
+        """Create floating damage number"""
+        self.damage_numbers.append({
+            'x': x,
+            'y': y,
+            'amount': int(amount),
+            'color': color,
+            'life': 1.0,
+            'created': time.time(),
+            'vy': -2
+        })
+        
+    def record_choice(self, event_type, delta=1):
+        """Track player morality choices"""
+        if event_type == 'mercy':
+            self.mercy_count += delta
+            self.player.choice_points += 1
+        elif event_type == 'aggression':
+            self.aggression_count += delta
+            self.player.choice_points -= 1
+        elif event_type == 'exploration':
+            self.exploration_secrets += delta
+            self.player.choice_points += 2

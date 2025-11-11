@@ -52,18 +52,19 @@ class Boss:
         if self.health <= 0:
             self.dead = True
 
-    def draw(self, surface, camera_x):
+    def draw(self, surface, camera_x, shake_y=0):
         if not self.dead:
             # Adjust position for camera
             draw_rect = self.rect.copy()
             draw_rect.x -= camera_x
+            draw_rect.y += shake_y
             
             pygame.draw.rect(surface, self.color, draw_rect)
             
             # Draw health bar with camera offset
             health_rect = pygame.Rect(
                 self.rect.x - camera_x, 
-                self.rect.y - 10,
+                self.rect.y - 10 + shake_y,
                 self.rect.width * (self.health / 200), 
                 5
             )

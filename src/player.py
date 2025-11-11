@@ -252,7 +252,7 @@ class Player(pygame.sprite.Sprite):
                         self.rect.top = t.bottom
                         self.vy = 0
 
-    def draw(self, surface, camera_x=0):
+    def draw(self, surface, camera_x=0, shake_y=0):
         now = time.time()
         
         # Draw dash particles with trails
@@ -269,10 +269,10 @@ class Player(pygame.sprite.Sprite):
                     trail_surf = pygame.Surface((particle['size'], particle['size']))
                     trail_surf.fill(particle['color'])
                     trail_surf.set_alpha(trail_alpha)
-                    surface.blit(trail_surf, (trail_x, particle['y']))
+                    surface.blit(trail_surf, (trail_x, particle['y'] + shake_y))
         
         # Draw the player with special effects
-        draw_pos = (self.rect.x - camera_x, self.rect.y)
+        draw_pos = (self.rect.x - camera_x, self.rect.y + shake_y)
         base_image = self.image.copy()
         
         # Add class-specific idle effects

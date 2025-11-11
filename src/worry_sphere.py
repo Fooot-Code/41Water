@@ -51,7 +51,7 @@ class WorrySphere:
                     e.take_damage(self.damage)
                     self.last_tick[id(e)] = now
 
-    def draw(self, surf, camera_x=0):
+    def draw(self, surf, camera_x=0, shake_y=0):
         # draw expanding translucent sphere
         r = self.radius()
         if r <= 0:
@@ -60,4 +60,4 @@ class WorrySphere:
         alpha = int(200 * (1 - self.progress()))
         color = (255, 160, 180, alpha)
         pygame.draw.circle(s, color, (r, r), r)
-        surf.blit(s, (self.x - r - camera_x, self.y - r))
+        surf.blit(s, (self.x - r - camera_x, self.y - r + shake_y))

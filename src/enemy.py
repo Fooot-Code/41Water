@@ -317,9 +317,9 @@ class Enemy(pygame.sprite.Sprite):
                 'color': (255, 200, 200)
             })
     
-    def draw(self, surf, camera_x):
+    def draw(self, surf, camera_x, shake_y=0):
         """Draw enemy with effects"""
-        draw_pos = (self.rect.x - camera_x, self.rect.y)
+        draw_pos = (self.rect.x - camera_x, self.rect.y + shake_y)
         now = time.time()
         
         # Get base image
@@ -356,7 +356,7 @@ class Enemy(pygame.sprite.Sprite):
                 p_surf = pygame.Surface((3, 3))
                 p_surf.fill(particle['color'])
                 p_surf.set_alpha(alpha)
-                p_pos = (int(particle['x'] - camera_x), int(particle['y']))
+                p_pos = (int(particle['x'] - camera_x), int(particle['y'] + shake_y))
                 surf.blit(p_surf, p_pos)
         
         # Draw health bar
